@@ -27,7 +27,7 @@ SEG_TEST segments an image into three regions — **Master** (rectangle), **Slav
 - **Numeric inputs** — Direct R/G/B entry fields (no sliders), with clamping and live update
 - **Baseline + ΔC** — Contrast measured at equal weights (33/33/33); delta shown live as weights change
 - **Reset** — One-click return to equal weights (33/33/33)
-- **Optimize** — Auto-search for the weight set that maximises overall contrast (WIP)
+- **Optimize** — Coarse-to-fine grid search for the weight set that maximises min(C_master, C_slave)
 - **Dynamic half-detection** — Composite labels auto-map Master/Slave to the correct image half
 - **Per-section save** — Individual Save buttons for Color, Mono, and Composite outputs
 - **Blend mode** — 50/50 blend or flat replace per region (Capture mode)
@@ -54,31 +54,8 @@ py SEG_TEST.py
 The app launches in **Simulated** mode with a default test pattern (cyan circle, yellow rectangle, light grey background).
 
 ## GUI Layout
+![alt text](gui.png)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ [Load Image]  (o) Capture  (o) Simulated   ☐ Blend Master/Slave/BG        │
-├──────────────────────────────────┬──────────────────────────────────────────┤
-│                                  │  Color Image                            │
-│         COLOR IMAGE              │  Master: [R] [G] [B] [☰]               │
-│                                  │  Slave:  [R] [G] [B] [☰]               │
-│                                  │  BG:     [R] [G] [B] [☰]               │
-│                                  │              [Save Color]               │
-├──────────────────────────────────┼──────────────────────────────────────────┤
-│                                  │  Mono Image                             │
-│         MONO IMAGE               │  Grey:  [R] [G] [B]                     │
-│                                  │  Contrast: Master=XX   Slave=XX         │
-│                                  │  ΔC:       Master=+X   Slave=+X         │
-│                                  │    [Reset] [Optimize] [Save Mono]       │
-├──────────────────────────────────┼──────────────────────────────────────────┤
-│                                  │  Composite Image                        │
-│   COMPOSITE  (Slave │ Master)    │  Master: [R] [G] [B]                    │
-│           red divider ↑          │  Slave:  [R] [G] [B]                    │
-│                                  │  Contrast: Master=XX   Slave=XX         │
-│                                  │  ΔC:       Master=+X   Slave=+X         │
-│                                  │           [Save Composite]               │
-└──────────────────────────────────┴──────────────────────────────────────────┘
-```
 
 ## Modes
 
@@ -127,6 +104,22 @@ $$C = |\text{median}(\text{region}) - \text{median}(\text{background})|$$
 ### Composite
 
 The image is split at the midpoint with a red vertical divider. Each half applies its own R/G/B weight set. The app auto-detects which segment is in which half, so the Master/Slave labels always map correctly.
+
+### Optimize
+
+Scoring function (maximin):
+
+$$\text{score}(w_R, w_G, w_B) = \min(C_{master}, C_{slave})$$
+
+This ensures neither region is sacrificed for the other.
+
+**Coarse-to-fine grid search:**
+
+1. **Coarse** — sweep all $(w_R, w_G, w_B)$ in steps of 5 over 0–100 (21³ = 9,261 combinations)
+2. **Fine** — refine ±5 around the best coarse result in steps of 1 (≤ 11³ = 1,331 combinations)
+3. Apply the best weights and update the display
+
+Per-region R/G/B pixel arrays are pre-extracted so each score evaluation only computes medians — no full image rebuilds. Progress bar shows 0–70% during coarse, 70–100% during fine.
 
 ## Input Reference
 

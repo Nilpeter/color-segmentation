@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 import os
+import threading
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -218,6 +219,7 @@ class App(ctk.CTk):
         self._baseline_grey_contrast = {"master": 0.0, "slave": 0.0}
         self._baseline_comp_contrast = {"left": 0.0, "right": 0.0, "master": 0.0, "slave": 0.0}
         self._master_in_left = True     # updated by _detect_half_mapping
+        self._initial_colors = None     # stored on load/simulate for color reset
         self._roi_mode = False
         self._roi_callback = None
         self._roi_start = None
@@ -232,6 +234,7 @@ class App(ctk.CTk):
 
         # Auto-start in Simulated mode
         self.mode_var.set("Simulated")
+        self._store_initial_colors()
         self.after(100, self._generate_simulated_image)
 
     # ------------------------------------------------------------------
@@ -301,6 +304,9 @@ class App(ctk.CTk):
             color_slider_inner, "BG", 2, default_r=240, default_g=240, default_b=240)
 
         ctk.CTkButton(slider_frame_color, text="Save Color", command=self._save_color,
+                       height=52, font=("Arial", 22)).pack(fill="x", side="bottom", pady=(8, 0))
+
+        ctk.CTkButton(slider_frame_color, text="Reset", command=self._reset_color_values,
                        height=52, font=("Arial", 22)).pack(fill="x", side="bottom", pady=(8, 0))
 
         row += 1
@@ -375,9 +381,14 @@ class App(ctk.CTk):
         ctk.CTkButton(grey_action_frame, text="Optimize", command=self._optimize_weights,
                        height=52, font=("Arial", 22)).pack(side="left", expand=True, fill="x", padx=(4, 0))
 
-        self.optimize_progress = ctk.CTkProgressBar(grey_right_frame)
+        self.optimize_progress_frame = ctk.CTkFrame(grey_right_frame, fg_color="transparent")
+        # Hidden by default; pack/pack_forget controls visibility
+        self.optimize_progress = ctk.CTkProgressBar(self.optimize_progress_frame)
         self.optimize_progress.set(0)
-        # Hidden by default; pack_forget keeps it invisible until optimization runs
+        self.optimize_progress.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.optimize_progress_label = ctk.CTkLabel(self.optimize_progress_frame, text="0 / 0",
+                                                      width=100, font=("Arial", 12))
+        self.optimize_progress_label.pack(side="right")
 
         row += 1
 
@@ -428,25 +439,22 @@ class App(ctk.CTk):
 
         # Row 1 = Slave (always)
         self.comp_row1_label = ctk.CTkLabel(comp_slider_frame, text="Slave", width=50)
-        self.comp_row1_label.grid(row=1, column=0, sticky="w", pady=(26, 0))
+        self.comp_row1_label.grid(row=1, column=0, sticky="w", pady=(8, 0))
 
         comp_rr_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
-        comp_rr_frame.grid(row=1, column=1, padx=4)
-        ctk.CTkLabel(comp_rr_frame, text="R", width=20).pack()
+        comp_rr_frame.grid(row=1, column=1, padx=4, pady=(8, 0))
         self.comp_right_r = NumericInput(comp_rr_frame, from_=0, to=100, default=33,
                                           command=lambda val: self._on_comp_slider_change())
         self.comp_right_r.pack()
 
         comp_rg_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
-        comp_rg_frame.grid(row=1, column=2, padx=4)
-        ctk.CTkLabel(comp_rg_frame, text="G", width=20).pack()
+        comp_rg_frame.grid(row=1, column=2, padx=4, pady=(8, 0))
         self.comp_right_g = NumericInput(comp_rg_frame, from_=0, to=100, default=33,
                                           command=lambda val: self._on_comp_slider_change())
         self.comp_right_g.pack()
 
         comp_rb_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
-        comp_rb_frame.grid(row=1, column=3, padx=4)
-        ctk.CTkLabel(comp_rb_frame, text="B", width=20).pack()
+        comp_rb_frame.grid(row=1, column=3, padx=4, pady=(8, 0))
         self.comp_right_b = NumericInput(comp_rb_frame, from_=0, to=100, default=33,
                                           command=lambda val: self._on_comp_slider_change())
         self.comp_right_b.pack()
@@ -469,6 +477,21 @@ class App(ctk.CTk):
 
         ctk.CTkButton(comp_right_frame, text="Save Composite", command=self._save_composite,
                        height=52, font=("Arial", 22)).pack(fill="x", side="bottom", pady=(8, 0))
+
+        comp_action_frame = ctk.CTkFrame(comp_right_frame, fg_color="transparent")
+        comp_action_frame.pack(fill="x", side="bottom", pady=(8, 0))
+        ctk.CTkButton(comp_action_frame, text="Reset", command=self._reset_comp_weights,
+                       height=52, font=("Arial", 22)).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ctk.CTkButton(comp_action_frame, text="Optimize", command=self._optimize_comp_weights,
+                       height=52, font=("Arial", 22)).pack(side="left", expand=True, fill="x", padx=(4, 0))
+
+        self.comp_optimize_progress_frame = ctk.CTkFrame(comp_right_frame, fg_color="transparent")
+        self.comp_optimize_progress = ctk.CTkProgressBar(self.comp_optimize_progress_frame)
+        self.comp_optimize_progress.set(0)
+        self.comp_optimize_progress.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.comp_optimize_progress_label = ctk.CTkLabel(self.comp_optimize_progress_frame, text="0 / 0",
+                                                           width=100, font=("Arial", 12))
+        self.comp_optimize_progress_label.pack(side="right")
 
     # ------------------------------------------------------------------
     # Slider helper
@@ -634,6 +657,7 @@ class App(ctk.CTk):
             b_slider.set(int(median_bgr[0]))
             g_slider.set(int(median_bgr[1]))
             r_slider.set(int(median_bgr[2]))
+        self._store_initial_colors()
 
     # ------------------------------------------------------------------
     # ROI fallback
@@ -1004,6 +1028,29 @@ class App(ctk.CTk):
                 self._cascade_all()
 
     # ------------------------------------------------------------------
+    # Color Reset
+    # ------------------------------------------------------------------
+    def _store_initial_colors(self):
+        """Snapshot current color slider values as the reset target."""
+        self._initial_colors = {
+            "master": (int(self.master_r.get()), int(self.master_g.get()), int(self.master_b.get())),
+            "slave":  (int(self.slave_r.get()),  int(self.slave_g.get()),  int(self.slave_b.get())),
+            "bg":     (int(self.bg_r.get()),     int(self.bg_g.get()),     int(self.bg_b.get())),
+        }
+
+    def _reset_color_values(self):
+        """Restore color sliders to the initial values (detected or simulated defaults)."""
+        if self._initial_colors is None:
+            return
+        r, g, b = self._initial_colors["master"]
+        self.master_r.set(r); self.master_g.set(g); self.master_b.set(b)
+        r, g, b = self._initial_colors["slave"]
+        self.slave_r.set(r); self.slave_g.set(g); self.slave_b.set(b)
+        r, g, b = self._initial_colors["bg"]
+        self.bg_r.set(r); self.bg_g.set(g); self.bg_b.set(b)
+        self._update_color_image()
+
+    # ------------------------------------------------------------------
     # Reset / Optimize
     # ------------------------------------------------------------------
     def _reset_grey_weights(self):
@@ -1014,24 +1061,300 @@ class App(ctk.CTk):
         self._update_greyscale_image()
 
     def _optimize_weights(self):
-        """Find the weight combination that maximises overall contrast.
+        """Find the weight combination that maximises min(C_master, C_slave).
 
-        TODO: implement scoring logic (balance Master vs Slave contrast).
+        Uses a coarse-to-fine grid search in a background thread:
+          1. Sweep step=5 over 0-100 (21^3 = 9261 combos)
+          2. Refine ±5 around best with step=1 (11^3 = 1331 combos)
         """
         if self.current_color_image is None or self.segments is None:
             return
 
-        # Show progress bar
+        master_seg = self.segments.get("master")
+        slave_seg = self.segments.get("slave")
+        bg_seg = self.segments.get("background")
+        if not (master_seg and slave_seg and bg_seg):
+            return
+
+        img = self.current_color_image
+        B, G, R = cv2.split(img)
+        R = R.astype(np.float64)
+        G = G.astype(np.float64)
+        B = B.astype(np.float64)
+
+        master_mask = master_seg["mask"] > 0
+        slave_mask = slave_seg["mask"] > 0
+        bg_mask = bg_seg["mask"] > 0
+
+        # Pre-extract per-region channel arrays
+        m_r, m_g, m_b = R[master_mask], G[master_mask], B[master_mask]
+        s_r, s_g, s_b = R[slave_mask], G[slave_mask], B[slave_mask]
+        bg_r, bg_g, bg_b = R[bg_mask], G[bg_mask], B[bg_mask]
+
+        # Downsample to ~1000 pixels per region for fast median approximation
+        MAX_SAMPLES = 1000
+        rng = np.random.default_rng(42)
+        if m_r.size > MAX_SAMPLES:
+            idx = rng.choice(m_r.size, MAX_SAMPLES, replace=False)
+            m_r, m_g, m_b = m_r[idx], m_g[idx], m_b[idx]
+        if s_r.size > MAX_SAMPLES:
+            idx = rng.choice(s_r.size, MAX_SAMPLES, replace=False)
+            s_r, s_g, s_b = s_r[idx], s_g[idx], s_b[idx]
+        if bg_r.size > MAX_SAMPLES:
+            idx = rng.choice(bg_r.size, MAX_SAMPLES, replace=False)
+            bg_r, bg_g, bg_b = bg_r[idx], bg_g[idx], bg_b[idx]
+
+        # Shared state for thread communication
+        progress = {"step": 0, "total": 21 ** 3, "done": False,
+                    "best": (33, 33, 33)}
+
+        def score(wr, wg, wb):
+            total = wr + wg + wb
+            if total == 0:
+                return -1.0
+            m_grey = np.median((m_r * wr + m_g * wg + m_b * wb) / total)
+            s_grey = np.median((s_r * wr + s_g * wg + s_b * wb) / total)
+            bg_grey = np.median((bg_r * wr + bg_g * wg + bg_b * wb) / total)
+            c_master = abs(m_grey - bg_grey)
+            c_slave = abs(s_grey - bg_grey)
+            return min(c_master, c_slave)
+
+        def worker():
+            coarse_range = range(0, 101, 5)
+            coarse_total = 21 ** 3
+            best_score = -1.0
+            best_weights = (33, 33, 33)
+            count = 0
+            for wr in coarse_range:
+                for wg in coarse_range:
+                    for wb in coarse_range:
+                        s = score(wr, wg, wb)
+                        if s > best_score:
+                            best_score = s
+                            best_weights = (wr, wg, wb)
+                        count += 1
+                        progress["step"] = count
+                        progress["best"] = best_weights
+
+            # Fine search
+            cr, cg, cb = best_weights
+            fine_r = range(max(0, cr - 5), min(101, cr + 6))
+            fine_g = range(max(0, cg - 5), min(101, cg + 6))
+            fine_b = range(max(0, cb - 5), min(101, cb + 6))
+            fine_total = len(fine_r) * len(fine_g) * len(fine_b)
+            progress["total"] = coarse_total + fine_total
+            count_fine = 0
+            for wr in fine_r:
+                for wg in fine_g:
+                    for wb in fine_b:
+                        s = score(wr, wg, wb)
+                        if s > best_score:
+                            best_score = s
+                            best_weights = (wr, wg, wb)
+                        count_fine += 1
+                        progress["step"] = coarse_total + count_fine
+                        progress["best"] = best_weights
+
+            progress["done"] = True
+
+        # Show progress frame
         self.optimize_progress.set(0)
-        self.optimize_progress.pack(fill="x", side="bottom", pady=(8, 0))
-        self.update_idletasks()
+        self.optimize_progress_label.configure(text=f"0 / {progress['total']}")
+        self.optimize_progress_frame.pack(fill="x", side="bottom", pady=(8, 0))
 
-        # TODO: real optimization loop — update self.optimize_progress.set(fraction)
-        messagebox.showinfo("Optimize", "Optimization not yet implemented.\n"
-                            "This will search for the weight set that maximises contrast.")
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        self._poll_optimize(progress)
 
-        # Hide progress bar
-        self.optimize_progress.pack_forget()
+    def _poll_optimize(self, progress):
+        """Poll the optimization thread and update progress bar / label."""
+        step = progress["step"]
+        total = progress["total"]
+        fraction = step / total if total > 0 else 0
+        self.optimize_progress.set(fraction)
+        self.optimize_progress_label.configure(text=f"{step} / {total}")
+
+        if progress["done"]:
+            best = progress["best"]
+            self.grey_r.set(best[0])
+            self.grey_g.set(best[1])
+            self.grey_b.set(best[2])
+            self._update_greyscale_image()
+            self.optimize_progress_frame.pack_forget()
+        else:
+            self.after(30, self._poll_optimize, progress)
+
+    # ------------------------------------------------------------------
+    # Composite Reset / Optimize
+    # ------------------------------------------------------------------
+    def _reset_comp_weights(self):
+        """Reset both composite weight rows to equal distribution (33/33/33)."""
+        for w in (self.comp_left_r, self.comp_left_g, self.comp_left_b,
+                  self.comp_right_r, self.comp_right_g, self.comp_right_b):
+            w.set(33)
+        self._update_composite_image()
+
+    def _optimize_comp_weights(self):
+        """Optimize both Master and Slave composite weights independently.
+
+        Each set is optimised to maximise contrast of its own region vs background
+        on its respective image half, using the same coarse-to-fine grid search.
+        """
+        if self.current_color_image is None or self.segments is None:
+            return
+
+        master_seg = self.segments.get("master")
+        slave_seg = self.segments.get("slave")
+        bg_seg = self.segments.get("background")
+        if not (master_seg and slave_seg and bg_seg):
+            return
+
+        img = self.current_color_image
+        B, G, R = cv2.split(img)
+        R = R.astype(np.float64)
+        G = G.astype(np.float64)
+        B = B.astype(np.float64)
+
+        h, w = img.shape[:2]
+        half = w // 2
+
+        # Build per-half region and background masks
+        master_mask = master_seg["mask"] > 0
+        slave_mask = slave_seg["mask"] > 0
+        bg_mask_full = bg_seg["mask"] > 0
+
+        if self._master_in_left:
+            region_left, region_right = master_mask, slave_mask
+        else:
+            region_left, region_right = slave_mask, master_mask
+
+        # Master region pixels (in its half)
+        master_half = np.zeros_like(master_mask)
+        master_bg = np.zeros_like(bg_mask_full)
+        if self._master_in_left:
+            master_half[:, :half] = region_left[:, :half]
+            master_bg[:, :half] = bg_mask_full[:, :half]
+        else:
+            master_half[:, half:] = region_right[:, half:]
+            master_bg[:, half:] = bg_mask_full[:, half:]
+
+        # Slave region pixels (in its half)
+        slave_half = np.zeros_like(slave_mask)
+        slave_bg = np.zeros_like(bg_mask_full)
+        if self._master_in_left:
+            slave_half[:, half:] = region_right[:, half:]
+            slave_bg[:, half:] = bg_mask_full[:, half:]
+        else:
+            slave_half[:, :half] = region_left[:, :half]
+            slave_bg[:, :half] = bg_mask_full[:, :half]
+
+        # Extract and downsample pixel arrays
+        MAX_SAMPLES = 1000
+        rng = np.random.default_rng(42)
+
+        def extract(mask):
+            r, g, b = R[mask], G[mask], B[mask]
+            if r.size > MAX_SAMPLES:
+                idx = rng.choice(r.size, MAX_SAMPLES, replace=False)
+                r, g, b = r[idx], g[idx], b[idx]
+            return r, g, b
+
+        mr, mg, mb = extract(master_half)
+        mbg_r, mbg_g, mbg_b = extract(master_bg)
+        sr, sg, sb = extract(slave_half)
+        sbg_r, sbg_g, sbg_b = extract(slave_bg)
+
+        def make_score(reg_r, reg_g, reg_b, bg_r, bg_g, bg_b):
+            def score(wr, wg, wb):
+                total = wr + wg + wb
+                if total == 0:
+                    return -1.0
+                reg_grey = np.median((reg_r * wr + reg_g * wg + reg_b * wb) / total)
+                bg_grey = np.median((bg_r * wr + bg_g * wg + bg_b * wb) / total)
+                return abs(reg_grey - bg_grey)
+            return score
+
+        score_master = make_score(mr, mg, mb, mbg_r, mbg_g, mbg_b)
+        score_slave = make_score(sr, sg, sb, sbg_r, sbg_g, sbg_b)
+
+        # Two independent searches: total = 2 * (coarse + fine)
+        coarse_total = 21 ** 3
+        progress = {"step": 0, "total": 2 * coarse_total, "done": False,
+                    "best_master": (33, 33, 33), "best_slave": (33, 33, 33)}
+
+        def search(score_fn, offset):
+            coarse_range = range(0, 101, 5)
+            best_s = -1.0
+            best_w = (33, 33, 33)
+            count = 0
+            for wr in coarse_range:
+                for wg in coarse_range:
+                    for wb in coarse_range:
+                        s = score_fn(wr, wg, wb)
+                        if s > best_s:
+                            best_s = s
+                            best_w = (wr, wg, wb)
+                        count += 1
+                        progress["step"] = offset + count
+            # Fine
+            cr, cg, cb = best_w
+            fine_r = range(max(0, cr - 5), min(101, cr + 6))
+            fine_g = range(max(0, cg - 5), min(101, cg + 6))
+            fine_b = range(max(0, cb - 5), min(101, cb + 6))
+            fine_total = len(fine_r) * len(fine_g) * len(fine_b)
+            progress["total"] = offset + coarse_total + fine_total + (coarse_total if offset == 0 else 0)
+            count_fine = 0
+            for wr in fine_r:
+                for wg in fine_g:
+                    for wb in fine_b:
+                        s = score_fn(wr, wg, wb)
+                        if s > best_s:
+                            best_s = s
+                            best_w = (wr, wg, wb)
+                        count_fine += 1
+                        progress["step"] = offset + coarse_total + count_fine
+            return best_w
+
+        def worker():
+            # Search Master weights
+            best_m = search(score_master, 0)
+            progress["best_master"] = best_m
+            master_done = progress["step"]
+            # Search Slave weights
+            best_s = search(score_slave, master_done)
+            progress["best_slave"] = best_s
+            progress["done"] = True
+
+        # Show progress frame
+        self.comp_optimize_progress.set(0)
+        self.comp_optimize_progress_label.configure(text=f"0 / {progress['total']}")
+        self.comp_optimize_progress_frame.pack(fill="x", side="bottom", pady=(8, 0))
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        self._poll_comp_optimize(progress)
+
+    def _poll_comp_optimize(self, progress):
+        """Poll the composite optimization thread."""
+        step = progress["step"]
+        total = progress["total"]
+        fraction = step / total if total > 0 else 0
+        self.comp_optimize_progress.set(fraction)
+        self.comp_optimize_progress_label.configure(text=f"{step} / {total}")
+
+        if progress["done"]:
+            bm = progress["best_master"]
+            bs = progress["best_slave"]
+            self.comp_left_r.set(bm[0])
+            self.comp_left_g.set(bm[1])
+            self.comp_left_b.set(bm[2])
+            self.comp_right_r.set(bs[0])
+            self.comp_right_g.set(bs[1])
+            self.comp_right_b.set(bs[2])
+            self._update_composite_image()
+            self.comp_optimize_progress_frame.pack_forget()
+        else:
+            self.after(30, self._poll_comp_optimize, progress)
 
     # ------------------------------------------------------------------
     # Save
