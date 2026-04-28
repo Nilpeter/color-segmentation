@@ -29,6 +29,11 @@ DEFAULT_SLAVE_BGR = (255, 255, 0)   # Cyan
 DEFAULT_MASTER_BGR = (0, 255, 255)  # Yellow
 DEFAULT_BG_BGR = (240, 240, 240)
 
+# Default greyscale weights (R, G, B)
+DEFAULT_GREY_R = 33
+DEFAULT_GREY_G = 36
+DEFAULT_GREY_B = 51
+
 
 # ---------------------------------------------------------------------------
 # NumericInput – small entry widget with .get()/.set() interface
@@ -73,13 +78,15 @@ class NumericInput(ctk.CTkFrame):
 # Pure functions (no Tkinter dependency)
 # ---------------------------------------------------------------------------
 
-def color_to_gray(image, r_weight, g_weight, b_weight):
+def color_to_gray(image, r_weight, g_weight, b_weight, normalize=True):
     """Weighted RGB to greyscale conversion.
 
     Parameters
     ----------
     image : np.ndarray  – BGR uint8 image (any size).
     r_weight, g_weight, b_weight : float – channel weights (0-100 scale).
+    normalize : bool – if True, divide by sum of weights (default).
+                       If False, weights act as pure gain (result clamped to 0-255).
 
     Returns
     -------
@@ -89,9 +96,13 @@ def color_to_gray(image, r_weight, g_weight, b_weight):
     if total == 0:
         return np.zeros(image.shape[:2], dtype=np.uint8)
     B, G, R = cv2.split(image)
-    grey = (R.astype(np.float64) * r_weight +
-            G.astype(np.float64) * g_weight +
-            B.astype(np.float64) * b_weight) / total
+    if normalize:
+        wr, wg, wb = r_weight / total, g_weight / total, b_weight / total
+    else:
+        wr, wg, wb = r_weight / 100.0, g_weight / 100.0, b_weight / 100.0
+    grey = (R.astype(np.float64) * wr +
+            G.astype(np.float64) * wg +
+            B.astype(np.float64) * wb)
     return np.clip(grey, 0, 255).astype(np.uint8)
 
 
@@ -269,6 +280,12 @@ class App(ctk.CTk):
         ctk.CTkCheckBox(top_frame, text="Blend BG", variable=self.blend_bg_var,
                          command=self._on_top_slider_change).pack(side="left", padx=3)
 
+        ctk.CTkLabel(top_frame, text="   ").pack(side="left")
+
+        self.normalize_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(top_frame, text="Normalize", variable=self.normalize_var,
+                         command=self._on_normalize_change).pack(side="left", padx=3)
+
         row += 1
 
         # --- Divider between toolbar and content ---
@@ -337,39 +354,46 @@ class App(ctk.CTk):
         grey_r_frame = ctk.CTkFrame(grey_slider_frame, fg_color="transparent")
         grey_r_frame.grid(row=0, column=1, padx=4)
         ctk.CTkLabel(grey_r_frame, text="R", width=20).pack()
-        self.grey_r = NumericInput(grey_r_frame, from_=0, to=100, default=33,
+        self.grey_r = NumericInput(grey_r_frame, from_=0, to=100, default=DEFAULT_GREY_R,
                                     command=lambda val: self._on_grey_slider_change())
         self.grey_r.pack()
 
         grey_g_frame = ctk.CTkFrame(grey_slider_frame, fg_color="transparent")
         grey_g_frame.grid(row=0, column=2, padx=4)
         ctk.CTkLabel(grey_g_frame, text="G", width=20).pack()
-        self.grey_g = NumericInput(grey_g_frame, from_=0, to=100, default=33,
+        self.grey_g = NumericInput(grey_g_frame, from_=0, to=100, default=DEFAULT_GREY_G,
                                     command=lambda val: self._on_grey_slider_change())
         self.grey_g.pack()
 
         grey_b_frame = ctk.CTkFrame(grey_slider_frame, fg_color="transparent")
         grey_b_frame.grid(row=0, column=3, padx=4)
         ctk.CTkLabel(grey_b_frame, text="B", width=20).pack()
-        self.grey_b = NumericInput(grey_b_frame, from_=0, to=100, default=33,
+        self.grey_b = NumericInput(grey_b_frame, from_=0, to=100, default=DEFAULT_GREY_B,
                                     command=lambda val: self._on_grey_slider_change())
         self.grey_b.pack()
 
         info_frame_grey = ctk.CTkFrame(grey_right_frame, fg_color="transparent")
         info_frame_grey.pack(anchor="w", pady=(8, 0))
-        ctk.CTkLabel(info_frame_grey, text="Contrast", width=70,
+        ctk.CTkLabel(info_frame_grey, text="Grey", width=70,
                      font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="e", padx=(0, 10))
+        self.grey_master_value_label = ctk.CTkLabel(info_frame_grey, text="Master: --", width=110)
+        self.grey_master_value_label.grid(row=0, column=1, sticky="w", padx=5)
+        self.grey_slave_value_label = ctk.CTkLabel(info_frame_grey, text="Slave: --", width=110)
+        self.grey_slave_value_label.grid(row=0, column=2, sticky="w", padx=5)
+
+        ctk.CTkLabel(info_frame_grey, text="Contrast", width=70,
+                     font=("Arial", 12, "bold")).grid(row=1, column=0, sticky="e", padx=(0, 10), pady=(6, 0))
         self.contrast_master_label = ctk.CTkLabel(info_frame_grey, text="Master: --", width=110)
-        self.contrast_master_label.grid(row=0, column=1, sticky="w", padx=5)
+        self.contrast_master_label.grid(row=1, column=1, sticky="w", padx=5, pady=(6, 0))
         self.contrast_slave_label = ctk.CTkLabel(info_frame_grey, text="Slave: --", width=110)
-        self.contrast_slave_label.grid(row=0, column=2, sticky="w", padx=5)
+        self.contrast_slave_label.grid(row=1, column=2, sticky="w", padx=5, pady=(6, 0))
 
         ctk.CTkLabel(info_frame_grey, text="\u0394C", width=70,
-                     font=("Arial", 12, "bold")).grid(row=1, column=0, sticky="e", padx=(0, 10), pady=(6, 0))
+                     font=("Arial", 12, "bold")).grid(row=2, column=0, sticky="e", padx=(0, 10), pady=(6, 0))
         self.delta_master_label = ctk.CTkLabel(info_frame_grey, text="Master: --", width=110)
-        self.delta_master_label.grid(row=1, column=1, sticky="w", padx=5, pady=(6, 0))
+        self.delta_master_label.grid(row=2, column=1, sticky="w", padx=5, pady=(6, 0))
         self.delta_slave_label = ctk.CTkLabel(info_frame_grey, text="Slave: --", width=110)
-        self.delta_slave_label.grid(row=1, column=2, sticky="w", padx=5, pady=(6, 0))
+        self.delta_slave_label.grid(row=2, column=2, sticky="w", padx=5, pady=(6, 0))
 
         ctk.CTkButton(grey_right_frame, text="Save Mono", command=self._save_grey,
                        height=52, font=("Arial", 22)).pack(fill="x", side="bottom", pady=(8, 0))
@@ -419,21 +443,21 @@ class App(ctk.CTk):
         comp_lr_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
         comp_lr_frame.grid(row=0, column=1, padx=4)
         ctk.CTkLabel(comp_lr_frame, text="R", width=20).pack()
-        self.comp_left_r = NumericInput(comp_lr_frame, from_=0, to=100, default=33,
+        self.comp_left_r = NumericInput(comp_lr_frame, from_=0, to=100, default=DEFAULT_GREY_R,
                                          command=lambda val: self._on_comp_slider_change())
         self.comp_left_r.pack()
 
         comp_lg_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
         comp_lg_frame.grid(row=0, column=2, padx=4)
         ctk.CTkLabel(comp_lg_frame, text="G", width=20).pack()
-        self.comp_left_g = NumericInput(comp_lg_frame, from_=0, to=100, default=33,
+        self.comp_left_g = NumericInput(comp_lg_frame, from_=0, to=100, default=DEFAULT_GREY_G,
                                          command=lambda val: self._on_comp_slider_change())
         self.comp_left_g.pack()
 
         comp_lb_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
         comp_lb_frame.grid(row=0, column=3, padx=4)
         ctk.CTkLabel(comp_lb_frame, text="B", width=20).pack()
-        self.comp_left_b = NumericInput(comp_lb_frame, from_=0, to=100, default=33,
+        self.comp_left_b = NumericInput(comp_lb_frame, from_=0, to=100, default=DEFAULT_GREY_B,
                                          command=lambda val: self._on_comp_slider_change())
         self.comp_left_b.pack()
 
@@ -443,37 +467,44 @@ class App(ctk.CTk):
 
         comp_rr_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
         comp_rr_frame.grid(row=1, column=1, padx=4, pady=(8, 0))
-        self.comp_right_r = NumericInput(comp_rr_frame, from_=0, to=100, default=33,
+        self.comp_right_r = NumericInput(comp_rr_frame, from_=0, to=100, default=DEFAULT_GREY_R,
                                           command=lambda val: self._on_comp_slider_change())
         self.comp_right_r.pack()
 
         comp_rg_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
         comp_rg_frame.grid(row=1, column=2, padx=4, pady=(8, 0))
-        self.comp_right_g = NumericInput(comp_rg_frame, from_=0, to=100, default=33,
+        self.comp_right_g = NumericInput(comp_rg_frame, from_=0, to=100, default=DEFAULT_GREY_G,
                                           command=lambda val: self._on_comp_slider_change())
         self.comp_right_g.pack()
 
         comp_rb_frame = ctk.CTkFrame(comp_slider_frame, fg_color="transparent")
         comp_rb_frame.grid(row=1, column=3, padx=4, pady=(8, 0))
-        self.comp_right_b = NumericInput(comp_rb_frame, from_=0, to=100, default=33,
+        self.comp_right_b = NumericInput(comp_rb_frame, from_=0, to=100, default=DEFAULT_GREY_B,
                                           command=lambda val: self._on_comp_slider_change())
         self.comp_right_b.pack()
 
         info_frame_comp = ctk.CTkFrame(comp_right_frame, fg_color="transparent")
         info_frame_comp.pack(anchor="w", pady=(8, 0))
-        ctk.CTkLabel(info_frame_comp, text="Contrast", width=70,
+        ctk.CTkLabel(info_frame_comp, text="Grey", width=70,
                      font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="e", padx=(0, 10))
+        self.comp_grey_master_value_label = ctk.CTkLabel(info_frame_comp, text="Master: --", width=110)
+        self.comp_grey_master_value_label.grid(row=0, column=1, sticky="w", padx=5)
+        self.comp_grey_slave_value_label = ctk.CTkLabel(info_frame_comp, text="Slave: --", width=110)
+        self.comp_grey_slave_value_label.grid(row=0, column=2, sticky="w", padx=5)
+
+        ctk.CTkLabel(info_frame_comp, text="Contrast", width=70,
+                     font=("Arial", 12, "bold")).grid(row=1, column=0, sticky="e", padx=(0, 10), pady=(6, 0))
         self.contrast_left_label = ctk.CTkLabel(info_frame_comp, text="Master: --", width=110)
-        self.contrast_left_label.grid(row=0, column=1, sticky="w", padx=5)
+        self.contrast_left_label.grid(row=1, column=1, sticky="w", padx=5, pady=(6, 0))
         self.contrast_right_label = ctk.CTkLabel(info_frame_comp, text="Slave: --", width=110)
-        self.contrast_right_label.grid(row=0, column=2, sticky="w", padx=5)
+        self.contrast_right_label.grid(row=1, column=2, sticky="w", padx=5, pady=(6, 0))
 
         ctk.CTkLabel(info_frame_comp, text="\u0394C", width=70,
-                     font=("Arial", 12, "bold")).grid(row=1, column=0, sticky="e", padx=(0, 10), pady=(6, 0))
+                     font=("Arial", 12, "bold")).grid(row=2, column=0, sticky="e", padx=(0, 10), pady=(6, 0))
         self.delta_left_label = ctk.CTkLabel(info_frame_comp, text="Master: --", width=110)
-        self.delta_left_label.grid(row=1, column=1, sticky="w", padx=5, pady=(6, 0))
+        self.delta_left_label.grid(row=2, column=1, sticky="w", padx=5, pady=(6, 0))
         self.delta_right_label = ctk.CTkLabel(info_frame_comp, text="Slave: --", width=110)
-        self.delta_right_label.grid(row=1, column=2, sticky="w", padx=5, pady=(6, 0))
+        self.delta_right_label.grid(row=2, column=2, sticky="w", padx=5, pady=(6, 0))
 
         ctk.CTkButton(comp_right_frame, text="Save Composite", command=self._save_composite,
                        height=52, font=("Arial", 22)).pack(fill="x", side="bottom", pady=(8, 0))
@@ -597,7 +628,9 @@ class App(ctk.CTk):
     # Load / Generate
     # ------------------------------------------------------------------
     def _load_image(self):
+        self.update()  # flush pending events before opening native dialog
         path = filedialog.askopenfilename(
+            parent=self,
             filetypes=[("BMP", "*.bmp"), ("JPEG", "*.jpg *.jpeg"),
                        ("All Images", "*.bmp *.jpg *.jpeg *.png")])
         if not path:
@@ -805,7 +838,9 @@ class App(ctk.CTk):
         """Compute contrast at equal weights (33/33/33) and store as baseline."""
         if self.current_color_image is None or self.segments is None:
             return
-        baseline_grey = color_to_gray(self.current_color_image, 33, 33, 33)
+        baseline_grey = color_to_gray(self.current_color_image,
+                                       DEFAULT_GREY_R, DEFAULT_GREY_G, DEFAULT_GREY_B,
+                                       normalize=self.normalize_var.get())
         master_seg = self.segments.get("master")
         slave_seg = self.segments.get("slave")
         bg_seg = self.segments.get("background")
@@ -912,19 +947,26 @@ class App(ctk.CTk):
         r_w = int(self.grey_r.get())
         g_w = int(self.grey_g.get())
         b_w = int(self.grey_b.get())
-        self.grey_image = color_to_gray(self.current_color_image, r_w, g_w, b_w)
+        self.grey_image = color_to_gray(self.current_color_image, r_w, g_w, b_w,
+                                         normalize=self.normalize_var.get())
         self._tk_grey = self._display_on_label(self.grey_label, self.grey_image)
 
-        # \u0394C (delta from baseline at equal weights)
+        # Grey values and \u0394C (delta from baseline at equal weights)
         if self.segments:
             master_seg = self.segments.get("master")
             slave_seg = self.segments.get("slave")
             bg_seg = self.segments.get("background")
             if master_seg and bg_seg:
+                m_pixels = self.grey_image[master_seg["mask"] > 0]
+                m_median = float(np.median(m_pixels)) if m_pixels.size else 0.0
+                self.grey_master_value_label.configure(text=f"Master: {m_median:.1f}")
                 c = compute_contrast(self.grey_image, master_seg["mask"], bg_seg["mask"])
                 delta = c - self._baseline_grey_contrast["master"]
                 self.delta_master_label.configure(text=f"Master: {delta:+.1f}")
             if slave_seg and bg_seg:
+                s_pixels = self.grey_image[slave_seg["mask"] > 0]
+                s_median = float(np.median(s_pixels)) if s_pixels.size else 0.0
+                self.grey_slave_value_label.configure(text=f"Slave: {s_median:.1f}")
                 c = compute_contrast(self.grey_image, slave_seg["mask"], bg_seg["mask"])
                 delta = c - self._baseline_grey_contrast["slave"]
                 self.delta_slave_label.configure(text=f"Slave: {delta:+.1f}")
@@ -943,13 +985,14 @@ class App(ctk.CTk):
         slave_g = int(self.comp_right_g.get())
         slave_b = int(self.comp_right_b.get())
 
+        norm = self.normalize_var.get()
         # Map Master/Slave weights to left/right halves based on detection
         if self._master_in_left:
-            grey_left = color_to_gray(self.current_color_image, master_r, master_g, master_b)
-            grey_right = color_to_gray(self.current_color_image, slave_r, slave_g, slave_b)
+            grey_left = color_to_gray(self.current_color_image, master_r, master_g, master_b, normalize=norm)
+            grey_right = color_to_gray(self.current_color_image, slave_r, slave_g, slave_b, normalize=norm)
         else:
-            grey_left = color_to_gray(self.current_color_image, slave_r, slave_g, slave_b)
-            grey_right = color_to_gray(self.current_color_image, master_r, master_g, master_b)
+            grey_left = color_to_gray(self.current_color_image, slave_r, slave_g, slave_b, normalize=norm)
+            grey_right = color_to_gray(self.current_color_image, master_r, master_g, master_b, normalize=norm)
 
         h, w = grey_left.shape[:2]
         half = w // 2
@@ -991,11 +1034,22 @@ class App(ctk.CTk):
             c_left = compute_contrast(composite, left_region_mask, left_bg_mask)
             c_right = compute_contrast(composite, right_region_mask, right_bg_mask)
 
+            # Median grey values per region half
+            left_pixels = composite[left_region_mask > 0]
+            right_pixels = composite[right_region_mask > 0]
+            g_left = float(np.median(left_pixels)) if left_pixels.size else 0.0
+            g_right = float(np.median(right_pixels)) if right_pixels.size else 0.0
+
             # Map left/right contrast to Master/Slave names
             if self._master_in_left:
                 c_master, c_slave = c_left, c_right
+                g_master, g_slave = g_left, g_right
             else:
                 c_master, c_slave = c_right, c_left
+                g_master, g_slave = g_right, g_left
+
+            self.comp_grey_master_value_label.configure(text=f"Master: {g_master:.1f}")
+            self.comp_grey_slave_value_label.configure(text=f"Slave: {g_slave:.1f}")
 
             delta_master = c_master - self._baseline_comp_contrast["master"]
             delta_slave = c_slave - self._baseline_comp_contrast["slave"]
@@ -1015,6 +1069,15 @@ class App(ctk.CTk):
 
     def _on_grey_slider_change(self, *_args):
         self._debounce(self._update_greyscale_image)
+
+    def _on_normalize_change(self, *_args):
+        """Normalize toggle affects baseline, greyscale, and composite."""
+        self._debounce(self._on_normalize_apply)
+
+    def _on_normalize_apply(self):
+        self._compute_baseline_contrast()
+        self._update_greyscale_image()
+        self._update_composite_image()
 
     def _on_comp_slider_change(self, *_args):
         self._debounce(self._update_composite_image)
@@ -1054,10 +1117,10 @@ class App(ctk.CTk):
     # Reset / Optimize
     # ------------------------------------------------------------------
     def _reset_grey_weights(self):
-        """Reset greyscale weights to equal distribution (33/33/33)."""
-        self.grey_r.set(33)
-        self.grey_g.set(33)
-        self.grey_b.set(33)
+        """Reset greyscale weights to default values."""
+        self.grey_r.set(DEFAULT_GREY_R)
+        self.grey_g.set(DEFAULT_GREY_G)
+        self.grey_b.set(DEFAULT_GREY_B)
         self._update_greyscale_image()
 
     def _optimize_weights(self):
@@ -1104,17 +1167,31 @@ class App(ctk.CTk):
             idx = rng.choice(bg_r.size, MAX_SAMPLES, replace=False)
             bg_r, bg_g, bg_b = bg_r[idx], bg_g[idx], bg_b[idx]
 
+        # Capture normalize state for the worker thread
+        norm = self.normalize_var.get()
+
         # Shared state for thread communication
         progress = {"step": 0, "total": 21 ** 3, "done": False,
-                    "best": (33, 33, 33)}
+                    "best": (DEFAULT_GREY_R, DEFAULT_GREY_G, DEFAULT_GREY_B)}
 
         def score(wr, wg, wb):
             total = wr + wg + wb
             if total == 0:
                 return -1.0
-            m_grey = np.median((m_r * wr + m_g * wg + m_b * wb) / total)
-            s_grey = np.median((s_r * wr + s_g * wg + s_b * wb) / total)
-            bg_grey = np.median((bg_r * wr + bg_g * wg + bg_b * wb) / total)
+            if norm:
+                div = total
+            else:
+                div = 100.0
+            raw_m = (m_r * wr + m_g * wg + m_b * wb) / div
+            raw_s = (s_r * wr + s_g * wg + s_b * wb) / div
+            raw_bg = (bg_r * wr + bg_g * wg + bg_b * wb) / div
+            if not norm:
+                raw_m = np.clip(raw_m, 0, 255)
+                raw_s = np.clip(raw_s, 0, 255)
+                raw_bg = np.clip(raw_bg, 0, 255)
+            m_grey = np.median(raw_m)
+            s_grey = np.median(raw_s)
+            bg_grey = np.median(raw_bg)
             c_master = abs(m_grey - bg_grey)
             c_slave = abs(s_grey - bg_grey)
             return min(c_master, c_slave)
@@ -1123,7 +1200,7 @@ class App(ctk.CTk):
             coarse_range = range(0, 101, 5)
             coarse_total = 21 ** 3
             best_score = -1.0
-            best_weights = (33, 33, 33)
+            best_weights = (33, 36, 51)
             count = 0
             for wr in coarse_range:
                 for wg in coarse_range:
@@ -1188,10 +1265,13 @@ class App(ctk.CTk):
     # Composite Reset / Optimize
     # ------------------------------------------------------------------
     def _reset_comp_weights(self):
-        """Reset both composite weight rows to equal distribution (33/33/33)."""
-        for w in (self.comp_left_r, self.comp_left_g, self.comp_left_b,
-                  self.comp_right_r, self.comp_right_g, self.comp_right_b):
-            w.set(33)
+        """Reset both composite weight rows to default values."""
+        for w, v in zip(
+            (self.comp_left_r, self.comp_left_g, self.comp_left_b,
+             self.comp_right_r, self.comp_right_g, self.comp_right_b),
+            (DEFAULT_GREY_R, DEFAULT_GREY_G, DEFAULT_GREY_B,
+             DEFAULT_GREY_R, DEFAULT_GREY_G, DEFAULT_GREY_B)):
+            w.set(v)
         self._update_composite_image()
 
     def _optimize_comp_weights(self):
@@ -1264,13 +1344,25 @@ class App(ctk.CTk):
         sr, sg, sb = extract(slave_half)
         sbg_r, sbg_g, sbg_b = extract(slave_bg)
 
+        # Capture normalize state for the worker thread
+        norm = self.normalize_var.get()
+
         def make_score(reg_r, reg_g, reg_b, bg_r, bg_g, bg_b):
             def score(wr, wg, wb):
                 total = wr + wg + wb
                 if total == 0:
                     return -1.0
-                reg_grey = np.median((reg_r * wr + reg_g * wg + reg_b * wb) / total)
-                bg_grey = np.median((bg_r * wr + bg_g * wg + bg_b * wb) / total)
+                if norm:
+                    div = total
+                else:
+                    div = 100.0
+                raw_reg = (reg_r * wr + reg_g * wg + reg_b * wb) / div
+                raw_bg = (bg_r * wr + bg_g * wg + bg_b * wb) / div
+                if not norm:
+                    raw_reg = np.clip(raw_reg, 0, 255)
+                    raw_bg = np.clip(raw_bg, 0, 255)
+                reg_grey = np.median(raw_reg)
+                bg_grey = np.median(raw_bg)
                 return abs(reg_grey - bg_grey)
             return score
 
@@ -1280,12 +1372,12 @@ class App(ctk.CTk):
         # Two independent searches: total = 2 * (coarse + fine)
         coarse_total = 21 ** 3
         progress = {"step": 0, "total": 2 * coarse_total, "done": False,
-                    "best_master": (33, 33, 33), "best_slave": (33, 33, 33)}
+                    "best_master": (DEFAULT_GREY_R, DEFAULT_GREY_G, DEFAULT_GREY_B), "best_slave": (DEFAULT_GREY_R, DEFAULT_GREY_G, DEFAULT_GREY_B)}
 
         def search(score_fn, offset):
             coarse_range = range(0, 101, 5)
             best_s = -1.0
-            best_w = (33, 33, 33)
+            best_w = (33, 36, 51)
             count = 0
             for wr in coarse_range:
                 for wg in coarse_range:
@@ -1362,7 +1454,9 @@ class App(ctk.CTk):
     def _save_color(self):
         if self.current_color_image is None:
             return
+        self.update()
         path = filedialog.asksaveasfilename(
+            parent=self,
             defaultextension=".bmp",
             filetypes=[("BMP", "*.bmp"), ("All files", "*.*")])
         if path:
@@ -1372,7 +1466,9 @@ class App(ctk.CTk):
     def _save_grey(self):
         if self.grey_image is None:
             return
+        self.update()
         path = filedialog.asksaveasfilename(
+            parent=self,
             defaultextension=".bmp",
             filetypes=[("BMP", "*.bmp"), ("All files", "*.*")])
         if path:
@@ -1382,7 +1478,9 @@ class App(ctk.CTk):
     def _save_composite(self):
         if self.composite_image is None:
             return
+        self.update()
         path = filedialog.asksaveasfilename(
+            parent=self,
             defaultextension=".bmp",
             filetypes=[("BMP", "*.bmp"), ("All files", "*.*")])
         if path:

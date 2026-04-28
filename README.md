@@ -25,8 +25,10 @@ SEG_TEST segments an image into three regions — **Master** (rectangle), **Slav
 - **ROI fallback** — Draw bounding rectangles when auto-detection fails
 - **Color picker** — [CTkColorPicker](https://github.com/Akascape/CTkColorPicker) popup (☰ button) per region
 - **Numeric inputs** — Direct R/G/B entry fields (no sliders), with clamping and live update
-- **Baseline + ΔC** — Contrast measured at equal weights (33/33/33); delta shown live as weights change
-- **Reset** — One-click return to equal weights (33/33/33)
+- **Normalize toggle** — Toolbar checkbox switches between ratio mode (weights sum to 1) and gain mode (weights scale 0–1, clipped to 0–255)
+- **Grey value** — Median grey level displayed per region in both Mono and Composite sections
+- **Baseline + ΔC** — Contrast measured at default weights (33/36/51); delta shown live as weights change
+- **Reset** — One-click return to default weights (33/36/51)
 - **Optimize** — Coarse-to-fine grid search for the weight set that maximises min(C_master, C_slave)
 - **Dynamic half-detection** — Composite labels auto-map Master/Slave to the correct image half
 - **Per-section save** — Individual Save buttons for Color, Mono, and Composite outputs
@@ -86,9 +88,15 @@ The app launches in **Simulated** mode with a default test pattern (cyan circle,
 
 ### Greyscale Conversion
 
+**Normalized** (default, checkbox checked):
+
 $$\text{grey} = \frac{R \cdot w_R + G \cdot w_G + B \cdot w_B}{w_R + w_G + w_B}$$
 
-Weights $w_R, w_G, w_B$ range 0–100, default 33 each (equal contribution).
+**Unnormalized** (checkbox unchecked):
+
+$$\text{grey} = \text{clip}\!\left(R \cdot \frac{w_R}{100} + G \cdot \frac{w_G}{100} + B \cdot \frac{w_B}{100},\ 0,\ 255\right)$$
+
+Weights $w_R, w_G, w_B$ range 0–100, default 33/36/51 (slight blue emphasis).
 
 ### Contrast
 
@@ -126,8 +134,9 @@ Per-region R/G/B pixel arrays are pre-extracted so each score evaluation only co
 | Section | Inputs | Range | Default | Purpose |
 |---|---|---|---|---|
 | Color | 9 numeric (R/G/B × Master/Slave/BG) + 3 color pickers | 0–255 | Detected or simulated | Region colour |
-| Mono | 3 numeric (R/G/B weight) | 0–100 | 33 | Channel contribution to greyscale |
-| Composite | 2×3 numeric (R/G/B weight × Master/Slave) | 0–100 | 33 | Per-half greyscale weights |
+| Mono | 3 numeric (R/G/B weight) | 0–100 | 33/36/51 | Channel contribution to greyscale |
+| Composite | 2×3 numeric (R/G/B weight × Master/Slave) | 0–100 | 33/36/51 | Per-half greyscale weights |
+| Toolbar | Normalize checkbox | on/off | on | Ratio vs gain mode |
 
 ## File I/O
 
