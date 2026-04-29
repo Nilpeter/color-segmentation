@@ -25,8 +25,8 @@ SIM_RECT_TL = (1400, 150)
 SIM_RECT_BR = (1700, 350)
 
 # Default simulated colours (BGR)
-DEFAULT_SLAVE_BGR = (255, 255, 0)   # Cyan
-DEFAULT_MASTER_BGR = (0, 255, 255)  # Yellow
+DEFAULT_MASTER_BGR = (239, 174, 0)  # Cyan
+DEFAULT_SLAVE_BGR = (0, 242, 255)   # Yellow
 DEFAULT_BG_BGR = (240, 240, 240)
 
 # Default greyscale weights (R, G, B)
@@ -34,6 +34,16 @@ DEFAULT_GREY_R = 33
 DEFAULT_GREY_G = 36
 DEFAULT_GREY_B = 51
 
+# Named colour presets (RGB order)
+COLOR_PRESETS = {
+    "Cyan":    (0, 174, 239),
+    "Magenta": (236, 0, 140),
+    "Yellow":  (255, 242, 0),
+    "Black":   (35, 31, 32),
+    "Orange":  (254, 80, 0),
+    "Green":   (0, 171, 132),
+    "Violet":  (68, 0, 153),
+}
 
 # ---------------------------------------------------------------------------
 # NumericInput – small entry widget with .get()/.set() interface
@@ -313,11 +323,11 @@ class App(ctk.CTk):
         color_slider_inner = ctk.CTkFrame(slider_frame_color, fg_color="transparent")
         color_slider_inner.pack(anchor="w")
 
-        self.master_r, self.master_g, self.master_b = self._make_slider_row(
-            color_slider_inner, "Master", 0, default_r=0, default_g=255, default_b=255)
-        self.slave_r, self.slave_g, self.slave_b = self._make_slider_row(
-            color_slider_inner, "Slave", 1, default_r=255, default_g=255, default_b=0)
-        self.bg_r, self.bg_g, self.bg_b = self._make_slider_row(
+        self.master_r, self.master_g, self.master_b, self.master_preset = self._make_slider_row(
+            color_slider_inner, "Master", 0, default_r=0, default_g=174, default_b=239, preset="Cyan")
+        self.slave_r, self.slave_g, self.slave_b, self.slave_preset = self._make_slider_row(
+            color_slider_inner, "Slave", 1, default_r=255, default_g=242, default_b=0, preset="Yellow")
+        self.bg_r, self.bg_g, self.bg_b, self.bg_preset = self._make_slider_row(
             color_slider_inner, "BG", 2, default_r=240, default_g=240, default_b=240)
 
         ctk.CTkButton(slider_frame_color, text="Save Color", command=self._save_color,
@@ -428,7 +438,7 @@ class App(ctk.CTk):
         self.comp_label.pack()
 
         comp_right_frame = ctk.CTkFrame(self, fg_color="transparent")
-        comp_right_frame.grid(row=row, column=1, padx=5, pady=5, sticky="nsw")
+        comp_right_frame.grid(row=row, column=1, padx=5, pady=5, sticky="nsew")
 
         ctk.CTkLabel(comp_right_frame, text="Composite Image",
                      font=("Arial", 14, "bold")).pack(anchor="center", pady=(0, 5))
@@ -528,7 +538,8 @@ class App(ctk.CTk):
     # Slider helper
     # ------------------------------------------------------------------
     def _make_slider_row(self, parent, label, grid_row,
-                         default_r=128, default_g=128, default_b=128):
+                         default_r=128, default_g=128, default_b=128,
+                         preset=None):
         """Create a labelled row of R, G, B numeric inputs (0-255)."""
         ctk.CTkLabel(parent, text=label, width=50).grid(
             row=grid_row, column=0, sticky="w", pady=(26, 0))
@@ -570,7 +581,23 @@ class App(ctk.CTk):
                                   command=_pick_color)
         pick_btn.grid(row=grid_row, column=4, padx=(4, 0), pady=(26, 0))
 
-        return r, g, b
+        preset_names = ["--"] + list(COLOR_PRESETS.keys())
+
+        def _on_preset(choice, _r=r, _g=g, _b=b):
+            if choice == "--":
+                return
+            pr, pg, pb = COLOR_PRESETS[choice]
+            _r.set(pr)
+            _g.set(pg)
+            _b.set(pb)
+            self._on_top_slider_change()
+
+        preset_menu = ctk.CTkOptionMenu(parent, values=preset_names,
+                                         command=_on_preset, width=90, height=28)
+        preset_menu.set(preset if preset and preset in COLOR_PRESETS else "--")
+        preset_menu.grid(row=grid_row, column=5, padx=(4, 0), pady=(26, 0))
+
+        return r, g, b, preset_menu
 
     # ------------------------------------------------------------------
     # Display helpers
@@ -1099,6 +1126,9 @@ class App(ctk.CTk):
             "master": (int(self.master_r.get()), int(self.master_g.get()), int(self.master_b.get())),
             "slave":  (int(self.slave_r.get()),  int(self.slave_g.get()),  int(self.slave_b.get())),
             "bg":     (int(self.bg_r.get()),     int(self.bg_g.get()),     int(self.bg_b.get())),
+            "master_preset": self.master_preset.get(),
+            "slave_preset":  self.slave_preset.get(),
+            "bg_preset":     self.bg_preset.get(),
         }
 
     def _reset_color_values(self):
@@ -1111,6 +1141,9 @@ class App(ctk.CTk):
         self.slave_r.set(r); self.slave_g.set(g); self.slave_b.set(b)
         r, g, b = self._initial_colors["bg"]
         self.bg_r.set(r); self.bg_g.set(g); self.bg_b.set(b)
+        self.master_preset.set(self._initial_colors.get("master_preset", "--"))
+        self.slave_preset.set(self._initial_colors.get("slave_preset", "--"))
+        self.bg_preset.set(self._initial_colors.get("bg_preset", "--"))
         self._update_color_image()
 
     # ------------------------------------------------------------------

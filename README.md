@@ -24,6 +24,7 @@ SEG_TEST segments an image into three regions — **Master** (rectangle), **Slav
 - **HSV segmentation** — Saturation thresholding detects coloured shapes on grey backgrounds
 - **ROI fallback** — Draw bounding rectangles when auto-detection fails
 - **Color picker** — [CTkColorPicker](https://github.com/Akascape/CTkColorPicker) popup (☰ button) per region
+- **Color presets** — Dropdown per row with named colours: Cyan, Magenta, Yellow, Black, Orange, Green, Violet
 - **Numeric inputs** — Direct R/G/B entry fields (no sliders), with clamping and live update
 - **Normalize toggle** — Toolbar checkbox switches between ratio mode (weights sum to 1) and gain mode (weights scale 0–1, clipped to 0–255)
 - **Grey value** — Median grey level displayed per region in both Mono and Composite sections
@@ -73,6 +74,20 @@ The app launches in **Simulated** mode with a default test pattern (cyan circle,
 
 - Generates a **2112×500** synthetic image with configurable shapes.
 - Defaults: cyan circle (Slave), yellow rectangle (Master), light grey background `(240, 240, 240)`.
+
+### Colour Presets
+
+| Name | R | G | B | Hex |
+|---|---|---|---|---|
+| Cyan | 0 | 174 | 239 | `#00AEEF` |
+| Magenta | 236 | 0 | 140 | `#EC008C` |
+| Yellow | 255 | 242 | 0 | `#FFF200` |
+| Black | 35 | 31 | 32 | `#231F20` |
+| Orange | 254 | 80 | 0 | `#FE5000` |
+| Green | 0 | 171 | 132 | `#00AB84` |
+| Violet | 68 | 0 | 153 | `#440099` |
+
+Select a preset from the dropdown next to each colour row (Master, Slave, BG) to instantly fill the R/G/B values. The ☰ colour picker remains available for arbitrary colours.
 - Input changes regenerate the image immediately — no segmentation step needed.
 
 ## Algorithms
@@ -146,6 +161,22 @@ Per-region R/G/B pixel arrays are pre-extracted so each score evaluation only co
 | **Save Color** | `.bmp` (default) | Colour image after region adjustments |
 | **Save Mono** | `.bmp` (default) | Greyscale conversion |
 | **Save Composite** | `.bmp` (default) | Composite image (without red divider) |
+
+## Difficult Combinations
+
+Some colour combinations make it impossible for a **single** set of greyscale weights to produce good contrast for both regions simultaneously. In these cases the Mono section's **Optimize** may improve one region at the expense of the other, because no weight triple can separate both from the background at once.
+
+The **Composite** section solves this by applying **independent weights per half** — each region gets the weight set that maximises its own contrast, without compromising the other.
+
+### Test Scenarios
+
+| # | Master | Slave | BG | Why it's hard |
+|---|--------|-------|----|---------------|
+| 1 | `(237, 218, 255)` | `(255, 255, 0)` | `(240, 240, 240)` | Master is near-white lavender — almost indistinguishable from the light background in any single channel mix |
+| 2 | `(126, 137, 175)` | `(237, 234, 176)` | `(235, 240, 243)` | Both regions are low-saturation pastels close to the background; boosting one channel to separate Master pushes Slave closer to BG |
+| 3 | `(0, 255, 255)` | `(241, 209, 255)` | `(240, 240, 240)` | Slave is near-white violet — very high luminance, almost identical to BG regardless of weight choice |
+
+To reproduce: set the Master/Slave/BG values in **Simulated** mode, click **Optimize** in both Mono and Composite, and compare the ΔC values. The Composite section will show positive ΔC for both regions where Mono cannot.
 
 ## Building Standalone Executable
 
